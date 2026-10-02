@@ -1,0 +1,495 @@
+name: Settings APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+
+      - name: Build APK
+        run: |
+          wget -q https://services.gradle.org/distributions/gradle-8.2-bin.zip
+          unzip -q gradle-8.2-bin.zip
+          export PATH="$PWD/gradle-8.2/bin:$PATH"
+
+          rm -rf app build.gradle settings.gradle gradle.properties
+
+          mkdir -p app/src/main/java/com/example/shtile
+          mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/layout
+          mkdir -p app/src/main/res/values
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = "Settings"
+          include ':app'
+          EOF
+
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.2.2' apply false
+              id 'org.jetbrains.kotlin.android' version '1.9.22' apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          org.gradle.jvmargs=-Xmx2048m
+          EOF
+
+          cat > app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+              id 'org.jetbrains.kotlin.android'
+          }
+          android {
+              namespace 'com.example.shtile'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.example.shtile"
+                  minSdk 24
+                  targetSdk 34
+                  versionCode 14
+                  versionName "14.0"
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = '17' }
+          }
+          dependencies {
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+              implementation 'com.google.android.material:material:1.11.0'
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:allowBackup="true"
+                  android:label="Settings"
+                  android:theme="@style/AppTheme">
+
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+
+                  <receiver android:name=".RunnerReceiver" android:exported="false"/>
+
+                  <service
+                      android:name=".SafeTileService"
+                      android:exported="true"
+                      android:icon="@drawable/ic_tile_normal"
+                      android:label="Boost"
+                      android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+                      <intent-filter>
+                          <action android:name="android.service.quicksettings.action.QS_TILE"/>
+                      </intent-filter>
+                  </service>
+
+                  <service
+                      android:name=".BrutalTileService"
+                      android:exported="true"
+                      android:icon="@drawable/ic_tile_brutal"
+                      android:label="Turbo Mode"
+                      android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+                      <intent-filter>
+                          <action android:name="android.service.quicksettings.action.QS_TILE"/>
+                      </intent-filter>
+                  </service>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/com/example/shtile/Runner.kt <<'EOF'
+          package com.example.shtile
+
+          import android.content.Context
+          import android.os.Handler
+          import android.os.Looper
+          import android.widget.Toast
+
+          object Runner {
+              fun runNormal(context: Context) {
+                  Thread {
+                      val code = try {
+                          val p = ProcessBuilder("su", "-c", "cd /data/local/tmp && ./.ixl")
+                              .redirectErrorStream(true).start()
+                          p.inputStream.bufferedReader().readText()
+                          p.waitFor()
+                      } catch (e: Exception) { -1 }
+                      Handler(Looper.getMainLooper()).post {
+                          Toast.makeText(context,
+                              if (code == 0) "Gucci Normal Done" else "Gucci Normal Exit $code",
+                              Toast.LENGTH_SHORT).show()
+                      }
+                  }.start()
+              }
+
+              fun runBrutal(context: Context) {
+                  Thread {
+                      val code = try {
+                          val p = ProcessBuilder("su", "-c",
+                              "cd /data/local/tmp && (echo 2; sleep 4; echo 7; sleep 2) | ./Gucci_brutal")
+                              .redirectErrorStream(true).start()
+                          p.inputStream.bufferedReader().readText()
+                          p.waitFor()
+                      } catch (e: Exception) { -1 }
+                      Handler(Looper.getMainLooper()).post {
+                          Toast.makeText(context,
+                              if (code == 0) "Gucci Brutal Done" else "Gucci Brutal Exit $code",
+                              Toast.LENGTH_SHORT).show()
+                      }
+                  }.start()
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/example/shtile/RunnerReceiver.kt <<'EOF'
+          package com.example.shtile
+
+          import android.content.BroadcastReceiver
+          import android.content.Context
+          import android.content.Intent
+
+          class RunnerReceiver : BroadcastReceiver() {
+              override fun onReceive(context: Context, intent: Intent) {
+                  when (intent.action) {
+                      "com.example.shtile.RUN_NORMAL" -> Runner.runNormal(context)
+                      "com.example.shtile.RUN_BRUTAL" -> Runner.runBrutal(context)
+                  }
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/example/shtile/SafeTileService.kt <<'EOF'
+          package com.example.shtile
+
+          import android.content.Intent
+          import android.service.quicksettings.Tile
+          import android.service.quicksettings.TileService
+
+          class SafeTileService : TileService() {
+              override fun onStartListening() {
+                  super.onStartListening()
+                  qsTile?.apply {
+                      label = "Boost"
+                      state = Tile.STATE_INACTIVE
+                      updateTile()
+                  }
+              }
+              override fun onClick() {
+                  super.onClick()
+                  val i = Intent(this, RunnerReceiver::class.java).apply {
+                      action = "com.example.shtile.RUN_NORMAL"
+                  }
+                  sendBroadcast(i)
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/example/shtile/BrutalTileService.kt <<'EOF'
+          package com.example.shtile
+
+          import android.content.Intent
+          import android.service.quicksettings.Tile
+          import android.service.quicksettings.TileService
+
+          class BrutalTileService : TileService() {
+              override fun onStartListening() {
+                  super.onStartListening()
+                  qsTile?.apply {
+                      label = "Turbo Mode"
+                      state = Tile.STATE_INACTIVE
+                      updateTile()
+                  }
+              }
+              override fun onClick() {
+                  super.onClick()
+                  val i = Intent(this, RunnerReceiver::class.java).apply {
+                      action = "com.example.shtile.RUN_BRUTAL"
+                  }
+                  sendBroadcast(i)
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/example/shtile/MainActivity.kt <<'EOF'
+          package com.example.shtile
+
+          import android.animation.ObjectAnimator
+          import android.os.Bundle
+          import android.view.View
+          import android.view.animation.AccelerateDecelerateInterpolator
+          import android.widget.Button
+          import android.widget.TextView
+          import androidx.appcompat.app.AppCompatActivity
+
+          class MainActivity : AppCompatActivity() {
+              private lateinit var status: TextView
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContentView(R.layout.activity_main)
+
+                  status = findViewById(R.id.status)
+
+                  findViewById<Button>(R.id.testSafeBtn).setOnClickListener {
+                      pulse(it)
+                      status.text = "Running Gucci Normal..."
+                      Runner.runNormal(this)
+                  }
+                  findViewById<Button>(R.id.testBrutalBtn).setOnClickListener {
+                      pulse(it)
+                      status.text = "Running Gucci Brutal..."
+                      Runner.runBrutal(this)
+                  }
+
+                  status.text = "Ready to test."
+              }
+
+              private fun pulse(v: View) {
+                  val a = ObjectAnimator.ofFloat(v, "scaleX", 1f, 0.96f, 1f).apply {
+                      duration = 200
+                      interpolator = AccelerateDecelerateInterpolator()
+                  }
+                  a.start()
+                  val b = ObjectAnimator.ofFloat(v, "scaleY", 1f, 0.96f, 1f).apply {
+                      duration = 200
+                      interpolator = AccelerateDecelerateInterpolator()
+                  }
+                  b.start()
+              }
+          }
+          EOF
+
+          cat > app/src/main/res/values/colors.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <color name="bg_deep">#07090D</color>
+              <color name="bg_panel_2">#171C24</color>
+              <color name="accent_clean">#00E5A0</color>
+              <color name="accent_turbo">#FF4D6D</color>
+              <color name="text_hi">#FFFFFF</color>
+              <color name="text_lo">#8E97A6</color>
+              <color name="stroke">#232A35</color>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/values/themes.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources xmlns:tools="http://schemas.android.com/tools">
+              <style name="AppTheme" parent="Theme.MaterialComponents.NoActionBar">
+                  <item name="colorPrimary">@color/accent_clean</item>
+                  <item name="colorOnPrimary">#001209</item>
+                  <item name="android:windowBackground">@color/bg_deep</item>
+                  <item name="android:statusBarColor" tools:targetApi="l">@color/bg_deep</item>
+                  <item name="android:navigationBarColor" tools:targetApi="l">@color/bg_deep</item>
+                  <item name="android:windowLightStatusBar" tools:targetApi="m">false</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/drawable/bg_panel.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android"
+              android:shape="rectangle">
+              <gradient
+                  android:startColor="#0E1B2A"
+                  android:centerColor="#102A3A"
+                  android:endColor="#0B141F"
+                  android:angle="135"/>
+              <corners android:radius="22dp"/>
+          </shape>
+          EOF
+
+          cat > app/src/main/res/drawable/bg_btn_clean.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <ripple xmlns:android="http://schemas.android.com/apk/res/android"
+              android:color="#33000000">
+              <item>
+                  <shape android:shape="rectangle">
+                      <gradient
+                          android:startColor="#00E5A0"
+                          android:endColor="#00B37C"
+                          android:angle="0"/>
+                      <corners android:radius="18dp"/>
+                  </shape>
+              </item>
+          </ripple>
+          EOF
+
+          cat > app/src/main/res/drawable/bg_btn_turbo.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <ripple xmlns:android="http://schemas.android.com/apk/res/android"
+              android:color="#33FFFFFF">
+              <item>
+                  <shape android:shape="rectangle">
+                      <gradient
+                          android:startColor="#FF4D6D"
+                          android:endColor="#B71C3C"
+                          android:angle="0"/>
+                      <corners android:radius="18dp"/>
+                  </shape>
+              </item>
+          </ripple>
+          EOF
+
+          cat > app/src/main/res/drawable/bg_output.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android"
+              android:shape="rectangle">
+              <solid android:color="@color/bg_panel_2"/>
+              <stroke android:width="1dp" android:color="@color/stroke"/>
+              <corners android:radius="16dp"/>
+          </shape>
+          EOF
+
+          cat > app/src/main/res/layout/activity_main.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:background="@color/bg_deep"
+              android:fillViewport="true">
+
+              <LinearLayout
+                  android:orientation="vertical"
+                  android:padding="20dp"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content">
+
+                  <LinearLayout
+                      android:orientation="vertical"
+                      android:background="@drawable/bg_panel"
+                      android:padding="22dp"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content">
+
+                      <TextView
+                          android:layout_width="wrap_content"
+                          android:layout_height="wrap_content"
+                          android:text="Control Panel"
+                          android:textColor="@color/text_hi"
+                          android:textSize="26sp"
+                          android:textStyle="bold"/>
+
+                      <TextView
+                          android:layout_width="wrap_content"
+                          android:layout_height="wrap_content"
+                          android:text="Quick device modes"
+                          android:textColor="#B3FFFFFF"
+                          android:textSize="13sp"
+                          android:layout_marginTop="4dp"/>
+                  </LinearLayout>
+
+                  <TextView
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="MODES"
+                      android:textColor="@color/text_lo"
+                      android:textSize="11sp"
+                      android:letterSpacing="0.18"
+                      android:layout_marginTop="26dp"
+                      android:layout_marginBottom="10dp"
+                      android:layout_marginStart="6dp"/>
+
+                  <Button
+                      android:id="@+id/testSafeBtn"
+                      android:layout_width="match_parent"
+                      android:layout_height="64dp"
+                      android:text="Gucci Normal"
+                      android:textColor="#001209"
+                      android:textSize="16sp"
+                      android:textStyle="bold"
+                      android:letterSpacing="0.05"
+                      android:background="@drawable/bg_btn_clean"
+                      android:stateListAnimator="@null"/>
+
+                  <Button
+                      android:id="@+id/testBrutalBtn"
+                      android:layout_width="match_parent"
+                      android:layout_height="64dp"
+                      android:text="Gucci Brutal"
+                      android:textColor="#FFFFFF"
+                      android:textSize="16sp"
+                      android:textStyle="bold"
+                      android:letterSpacing="0.05"
+                      android:background="@drawable/bg_btn_turbo"
+                      android:stateListAnimator="@null"
+                      android:layout_marginTop="14dp"/>
+
+                  <TextView
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="OUTPUT"
+                      android:textColor="@color/text_lo"
+                      android:textSize="11sp"
+                      android:letterSpacing="0.18"
+                      android:layout_marginTop="28dp"
+                      android:layout_marginBottom="10dp"
+                      android:layout_marginStart="6dp"/>
+
+                  <LinearLayout
+                      android:background="@drawable/bg_output"
+                      android:padding="16dp"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:minHeight="180dp">
+
+                      <TextView
+                          android:id="@+id/status"
+                          android:layout_width="match_parent"
+                          android:layout_height="wrap_content"
+                          android:text="Ready to test."
+                          android:textColor="@color/text_hi"
+                          android:typeface="monospace"
+                          android:textSize="12sp"
+                          android:lineSpacingExtra="3dp"/>
+                  </LinearLayout>
+
+                  <TextView
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:text="v14.0"
+                      android:textColor="@color/text_lo"
+                      android:textSize="10sp"
+                      android:gravity="center"
+                      android:layout_marginTop="24dp"
+                      android:letterSpacing="0.08"/>
+              </LinearLayout>
+          </ScrollView>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_tile_normal.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="#FFFFFFFF"
+                  android:pathData="M12,2L4,5v6c0,5.55 3.84,10.74 8,12 4.16,-1.26 8,-6.45 8,-12V5l-8,-3z"/>
+         
